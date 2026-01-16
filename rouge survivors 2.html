@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ROUGE SURVIVORS 2</title>
+    <style>
+        body { display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #010206; font-family: 'Orbitron', sans-serif; user-select: none; overflow: hidden; color: white; }
+        canvas { border: 2px solid #00d2ff55; background: #000; box-shadow: 0 0 80px rgba(0, 210, 255, 0.15); image-rendering: auto; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.05) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02)); background-size: 100% 3px, 3px 100%; z-index: 10; }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="ui-layer"></div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d', { alpha: false });
+        const VIEW_W = 1400, VIEW_H = 900;
+        // MAP SIZE INCREASED
+        const MAP_W = 4000, MAP_H = 3000;
+        canvas.width = VIEW_W; canvas.height = VIEW_H;
+
+        const STATES = { MENU: 0, CHAR_SELECT: 1, PLAYING: 2, LEVEL_UP: 3, GAMEOVER: 4 };
+        const RARITY = {
+            COMMON: { n: "COMMON", c: "#ffffff" },
+            RARE: { n: "RARE", c: "#00d2ff" },
+            EPIC: { n: "EPIC", c: "#a020f0" },
+            LEGENDARY: { n: "LEGENDARY", c: "#ffdf33" }
+        };
+
+        const CHARACTERS = [
+            { n: "INTERCEPTOR", s: 680, fr: 0.08, hp: 100, c: "#00d2ff", d: "Agile Strike Craft" },
+            { n: "TANK", s: 400, fr: 0.16, hp: 300, c: "#ffdf33", d: "Heavy Juggernaut" },
+            { n: "WRAITH", s: 600, fr: 0.11, hp: 90, c: "#a020f0", d: "Experimental Stealth" }
+        ];
+
+        const UPGRADES = [
+            { n: "REINFORCED HULL", d: "+20 Max HP", r: RARITY.COMMON, f: () => { player.maxHp += 20; player.hp += 20; } },
+            { n: "STIM SENSORS", d: "+10% Move Speed", r: RARITY.COMMON, f: () => { player.speed *= 1.1; } },
+            { n: "CALIBRATED SIGHTS", d: "+15% Damage", r: RARITY.COMMON, f: () => { player.dmg += 1; } },
+            { n: "LEAD RAIN", d: "-10% Cooldown", r: RARITY.COMMON, f: () => { player.fireRate *= 0.9; } },
+            { n: "OVERCHARGE COILS", d: "-20% Cooldown", r: RARITY.RARE, f: () => { player.fireRate *= 0.8; } },
+            { n: "PLASMA SPARK", d: "+40% Damage", r: RARITY.RARE, f: () => { player.dmg += 2; } },
+            { n: "KINETIC SHIELD", d: "+2 Shield Charges", r: RARITY.RARE, f: () => { player.shield += 2; } },
+            { n: "NANO-REPAIR", d: "Heal 30 HP", r: RARITY.RARE, f: () => { player.hp = Math.min(player.maxHp, player.hp + 30); } },
+            { n: "THRUSTER OVERCLOCK", d: "+20% Speed", r: RARITY.RARE, f: () => { player.speed *= 1.2; } },
+            { n: "TITAN PLATING", d: "+100 Max HP", r: RARITY.EPIC, f: () => { player.maxHp += 100; player.hp += 100; } },
+            { n: "HYPER-DRIVE", d: "+30% Speed", r: RARITY.EPIC, f: () => { player.speed *= 1.3; } },
+            { n: "VOID ROUNDS", d: "+100% Damage", r: RARITY.EPIC, f: () => { player.dmg *= 2; } },
+            { n: "AEGIS CORE", d: "+5 Shield Charges", r: RARITY.EPIC, f: () => { player.shield += 5; } },
+            { n: "SENSORY OVERLOAD", d: "-40% Cooldown", r: RARITY.EPIC, f: () => { player.fireRate *= 0.6; } },
+            { n: "GOD-SLAYER", d: "+250% Damage", r: RARITY.LEGENDARY, f: () => { player.dmg *= 3.5; } },
+            { n: "OMNIPOTENCE", d: "Triple HP & Speed", r: RARITY.LEGENDARY, f: () => { player.maxHp *= 3; player.hp *= 3; player.speed *= 3; } },
+            { n: "TIME DILATION", d: "-60% Fire Cooldown", r: RARITY.LEGENDARY, f: () => { player.fireRate *= 0.4; } },
+            { n: "IMMORTAL ENGINE", d: "Full Heal & +10 Shield", r: RARITY.LEGENDARY, f: () => { player.hp = player.maxHp; player.shield += 10; } },
+            { n: "GALAXY COLLIDER", d: "+500 Max HP", r: RARITY.LEGENDARY, f: () => { player.maxHp += 500; player.hp += 500; } },
+            { n: "NEUTRON STAR", d: "+1000% Damage", r: RARITY.LEGENDARY, f: () => { player.dmg *= 11; } },
+            { n: "LIGHT SPEED", d: "Immense Speed Boost", r: RARITY.LEGENDARY, f: () => { player.speed *= 5; } }
+        ];
+
+        let char = CHARACTERS[0], gameState = STATES.MENU;
+        let lastTime = performance.now(), shake = 0, wave = 1, enemiesToSpawn = 0, upgradeChoices = [];
+        let waveMsgTimer = 0, menuTimer = 0;
+        const player = { x: MAP_W/2, y: MAP_H/2, r: 24, speed: 0, fireRate: 0, timer: 0, hp: 0, maxHp: 0, angle: 0, shield: 0, xp: 0, nextXp: 100, lvl: 1, dmg: 3, muzzleFlash: 0 };
+        const cam = { x: 0, y: 0 };
+        let enemies = [], bullets = [], stars = [], crystals = [], particles = [];
+        let keys = {}, mouse = { x: 0, y: 0, down: false };
+
+        for(let i=0; i<800; i++) stars.push({x: Math.random()*MAP_W, y: Math.random()*MAP_H, s: Math.random()*3+1, o: Math.random()});
+
+        function drawShip(x, y, angle, color, type, scale=1) {
+            ctx.save(); ctx.translate(x, y); ctx.rotate(angle); ctx.scale(scale, scale);
+            const pulse = Math.sin(Date.now() / 150) * 5;
+
+            // Engine Glow Trail
+            ctx.fillStyle = color; ctx.globalAlpha = 0.3;
+            ctx.beginPath(); ctx.moveTo(-40, 0); ctx.lineTo(-70 - pulse*2, -10); ctx.lineTo(-70 - pulse*2, 10); ctx.closePath(); ctx.fill();
+            ctx.globalAlpha = 1;
+
+            ctx.shadowBlur = 15; ctx.shadowColor = color;
+            if (type === "INTERCEPTOR") {
+                ctx.fillStyle = "#1a1c25"; ctx.strokeStyle = color; ctx.lineWidth = 2.5;
+                // Main Hull with extra angles
+                ctx.beginPath(); ctx.moveTo(60, 0); ctx.lineTo(15, -25); ctx.lineTo(-20, -25); ctx.lineTo(-50, -10); ctx.lineTo(-50, 10); ctx.lineTo(-20, 25); ctx.lineTo(15, 25); ctx.closePath(); ctx.fill(); ctx.stroke();
+                // Secondary wing plates
+                ctx.fillStyle = "#0a0b10";
+                ctx.beginPath(); ctx.moveTo(10, -25); ctx.lineTo(-10, -65); ctx.lineTo(-45, -65); ctx.lineTo(-30, -20); ctx.closePath(); ctx.fill(); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(10, 25); ctx.lineTo(-10, 65); ctx.lineTo(-45, 65); ctx.lineTo(-30, 20); ctx.closePath(); ctx.fill(); ctx.stroke();
+                // Tech details
+                ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
+                ctx.strokeRect(-15, -10, 30, 20);
+            } else if (type === "TANK") {
+                ctx.fillStyle = "#1a1c25"; ctx.strokeStyle = color; ctx.lineWidth = 4;
+                ctx.beginPath(); ctx.rect(-55, -45, 100, 90); ctx.fill(); ctx.stroke();
+                // Heavy armor blocks
+                ctx.fillStyle = "#2a2d3a";
+                ctx.fillRect(0, -55, 40, 110);
+                ctx.strokeRect(0, -55, 40, 110);
+                // Tread guard details
+                ctx.fillStyle = "#0a0b10";
+                ctx.beginPath(); ctx.rect(-30, -75, 70, 30); ctx.fill(); ctx.stroke();
+                ctx.beginPath(); ctx.rect(-30, 45, 70, 30); ctx.fill(); ctx.stroke();
+            } else { // WRAITH
+                ctx.fillStyle = "#1a1c25"; ctx.strokeStyle = color; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(70, 0); ctx.lineTo(-20, -25); ctx.lineTo(-60, 0); ctx.lineTo(-20, 25); ctx.closePath(); ctx.fill(); ctx.stroke();
+                // Energy scythes
+                ctx.strokeStyle = color; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.moveTo(30, -15); ctx.lineTo(20, -75); ctx.lineTo(-40, -45); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(30, 15); ctx.lineTo(20, 75); ctx.lineTo(-40, 45); ctx.stroke();
+                // Core
+                ctx.fillStyle = color; ctx.globalAlpha = 0.4;
+                ctx.beginPath(); ctx.arc(0,0,28+pulse,0,Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+            }
+            // Glow Details
+            ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(-42, 0, 9 + pulse, 0, Math.PI*2); ctx.fill();
+            ctx.shadowBlur = 0; ctx.fillStyle = "rgba(255,255,255,0.9)";
+            ctx.beginPath(); ctx.ellipse(20, 0, 18, 8, 0, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+        }
+
+        function drawEnemy(e) {
+            ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(Math.atan2(player.y - e.y, player.x - e.x));
+            ctx.shadowBlur = 15; ctx.shadowColor = "#ff4757"; ctx.strokeStyle = "#ff4757"; ctx.lineWidth = 2.5;
+            ctx.beginPath(); ctx.moveTo(10, -15); ctx.lineTo(-15, -25); ctx.lineTo(-10, -5); ctx.moveTo(10, 15); ctx.lineTo(-15, 25); ctx.lineTo(-10, 5); ctx.stroke();
+            ctx.fillStyle = "#1a0505"; ctx.beginPath(); ctx.moveTo(20, 0); ctx.lineTo(-5, -12); ctx.lineTo(-15, 0); ctx.lineTo(-5, 12); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawBullet(b) {
+            ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx));
+            let grad = ctx.createLinearGradient(0, 0, -40, 0); grad.addColorStop(0, "white"); grad.addColorStop(1, "transparent");
+            ctx.fillStyle = grad; ctx.fillRect(-40, -2, 40, 4); ctx.fillStyle = "white"; ctx.shadowBlur = 10; ctx.shadowColor = "#00d2ff";
+            ctx.beginPath(); ctx.ellipse(0, 0, 12, 4, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+        }
+
+        function createParticles(x, y, color) {
+            for(let i=0; i<15; i++) particles.push({ x: x, y: y, vx: (Math.random()-0.5) * 12, vy: (Math.random()-0.5) * 12, life: 1.0, size: Math.random() * 4 + 2, color: color });
+        }
+
+        function update(dt) {
+            menuTimer += dt;
+            if (gameState !== STATES.PLAYING) return;
+            if (shake > 0) shake -= dt * 60;
+            if (waveMsgTimer > 0) waveMsgTimer -= dt;
+            if (player.muzzleFlash > 0) player.muzzleFlash -= dt * 10;
+            let mx = (keys['KeyD']?1:0) - (keys['KeyA']?1:0), my = (keys['KeyS']?1:0) - (keys['KeyW']?1:0);
+            if(mx || my) { let mag = Math.sqrt(mx*mx + my*my); player.x += (mx/mag) * player.speed * dt; player.y += (my/mag) * player.speed * dt; }
+            player.x = Math.max(50, Math.min(MAP_W-50, player.x)); player.y = Math.max(50, Math.min(MAP_H-50, player.y));
+            cam.x = Math.max(0, Math.min(MAP_W - VIEW_W, player.x - VIEW_W/2)); cam.y = Math.max(0, Math.min(MAP_H - VIEW_H, player.y - VIEW_H/2));
+            player.angle = Math.atan2((mouse.y + cam.y) - player.y, (mouse.x + cam.x) - player.x);
+            player.timer -= dt;
+            if(mouse.down && player.timer <= 0) { bullets.push({ x: player.x, y: player.y, vx: Math.cos(player.angle)*2100, vy: Math.sin(player.angle)*2100 }); player.timer = player.fireRate; player.muzzleFlash = 1.0; shake = 4; }
+            if(player.xp >= player.nextXp) { player.lvl++; player.xp = 0; player.nextXp = Math.floor(player.nextXp * 1.35); upgradeChoices = []; let pool = [...UPGRADES]; for(let i=0; i<3; i++) upgradeChoices.push(pool.splice(Math.floor(Math.random()*pool.length), 1)[0]); gameState = STATES.LEVEL_UP; mouse.down = false; }
+            if (enemiesToSpawn > 0 && Math.random() < 0.05) { let side = Math.floor(Math.random()*4), ex, ey; if(side==0){ex=Math.random()*MAP_W; ey=-50;} else if(side==1){ex=MAP_W+50; ey=Math.random()*MAP_H;} else if(side==2){ex=Math.random()*MAP_W; ey=MAP_H+50;} else {ex=-50; ey=Math.random()*MAP_H;} enemies.push({ x: ex, y: ey, r: 22, hp: 2 + (wave*1.2), s: 160 + (wave*10) }); enemiesToSpawn--; }
+            if (enemiesToSpawn === 0 && enemies.length === 0) { wave++; enemiesToSpawn = 8 + (wave * 5); waveMsgTimer = 2.5; }
+            bullets.forEach((b, i) => { b.x += b.vx * dt; b.y += b.vy * dt; if(b.x<0 || b.x>MAP_W || b.y<0 || b.y>MAP_H) bullets.splice(i,1); enemies.forEach((e, j) => { if(Math.hypot(b.x-e.x, b.y-e.y) < e.r + 15) { e.hp -= player.dmg; createParticles(b.x, b.y, "white"); bullets.splice(i,1); if(e.hp <= 0) { createParticles(e.x, e.y, "#ff4757"); crystals.push({x: e.x, y: e.y}); enemies.splice(j,1); } } }); });
+            particles.forEach((p, i) => { p.x += p.vx; p.y += p.vy; p.life -= dt * 2; if(p.life <= 0) particles.splice(i,1); });
+            crystals.forEach((c, i) => { let d = Math.hypot(player.x-c.x, player.y-c.y); if(d < 350) { let a = Math.atan2(player.y-c.y, player.x-c.x); c.x += Math.cos(a)*1200*dt; c.y += Math.sin(a)*1200*dt; } if(d < 50) { player.xp += 34; crystals.splice(i,1); } });
+            enemies.forEach((e, i) => { let a = Math.atan2(player.y-e.y, player.x-e.x); e.x += Math.cos(a)*e.s*dt; e.y += Math.sin(a)*e.s*dt; if(Math.hypot(player.x-e.x, player.y-e.y) < player.r + e.r) { if(player.shield > 0) player.shield--; else player.hp -= 20; createParticles(e.x, e.y, "#ffdf33"); enemies.splice(i,1); shake = 25; if(player.hp <= 0) gameState = STATES.GAMEOVER; } });
+        }
+
+        function drawPlanet(x, y, r, color, ring) {
+            ctx.save(); ctx.shadowBlur = 40; ctx.shadowColor = color;
+            let grad = ctx.createRadialGradient(x-r/3, y-r/3, 0, x, y, r);
+            grad.addColorStop(0, "#fff"); grad.addColorStop(0.2, color); grad.addColorStop(1, "#000");
+            ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+            if(ring) { ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.lineWidth = 15; ctx.beginPath(); ctx.ellipse(x, y, r*2.2, r*0.5, Math.PI/8, 0, Math.PI*2); ctx.stroke(); }
+            ctx.restore();
+        }
+
+        function draw() {
+            ctx.fillStyle = "#010206"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+            if(gameState === STATES.MENU) {
+                stars.forEach(s => { ctx.fillStyle = `rgba(255,255,255,${s.o*0.5})`; ctx.fillRect((s.x*0.5 + menuTimer*20)%VIEW_W, s.y%VIEW_H, s.s, s.s); });
+                drawPlanet(VIEW_W*0.8, VIEW_H*0.5, 250, "#00d2ff", true);
+                drawPlanet(VIEW_W*0.2, VIEW_H*0.2, 40, "#ff4757", false);
+                drawMenus();
+            } else if (gameState === STATES.GAMEOVER) {
+                ctx.fillStyle = "rgba(10,0,0,0.8)"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+                ctx.textAlign = "center"; ctx.fillStyle = "#ff4757"; ctx.font = "900 120px Orbitron"; ctx.fillText("CRITICAL FAILURE", VIEW_W/2, 400);
+                ctx.fillStyle = "#fff"; ctx.font = "bold 30px Orbitron"; ctx.fillText("PILOT KIA - CLICK TO RESTART", VIEW_W/2, 500);
+            } else {
+                ctx.save(); ctx.translate(-cam.x, -cam.y); if(shake > 0) ctx.translate((Math.random()-0.5)*shake, (Math.random()-0.5)*shake);
+                stars.forEach(s => { ctx.fillStyle = `rgba(255,255,255,${s.o})`; ctx.fillRect(s.x, s.y, s.s, s.s); });
+                crystals.forEach(c => { ctx.fillStyle = "#00ff88"; ctx.fillRect(c.x-6, c.y-6, 12, 12); });
+                bullets.forEach(b => drawBullet(b));
+                particles.forEach(p => { ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size); });
+                ctx.globalAlpha = 1; enemies.forEach(e => drawEnemy(e));
+                drawShip(player.x, player.y, player.angle, char.c, char.n);
+                ctx.restore();
+                if(gameState === STATES.PLAYING || gameState === STATES.LEVEL_UP) drawHUD();
+                if(gameState === STATES.LEVEL_UP) {
+                    ctx.fillStyle = "rgba(0,0,0,0.95)"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+                    ctx.textAlign = "center"; ctx.fillStyle = "#00ff88"; ctx.font = "900 50px Orbitron"; ctx.fillText("SYSTEM AUGMENTATION", VIEW_W/2, 120);
+                    upgradeChoices.forEach((up, i) => {
+                        let y = 320 + (i * 170);
+                        ctx.fillStyle = "#0a0a0f"; ctx.strokeStyle = up.r.c; ctx.lineWidth = 5;
+                        ctx.fillRect(VIEW_W/2-400, y-60, 800, 140); ctx.strokeRect(VIEW_W/2-400, y-60, 800, 140);
+                        ctx.fillStyle = up.r.c; ctx.font = "900 18px Orbitron"; ctx.fillText(up.r.n, VIEW_W/2, y-35);
+                        ctx.fillStyle = "#fff"; ctx.font = "900 36px Orbitron"; ctx.fillText(up.n, VIEW_W/2, y + 15);
+                        ctx.font = "bold 20px Orbitron"; ctx.fillStyle = "#aaa"; ctx.fillText(up.d, VIEW_W/2, y + 55);
+                    });
+                }
+            }
+            if(gameState === STATES.CHAR_SELECT) drawMenus();
+        }
+
+        function drawHUD() {
+            ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(20, 20, 440, 140);
+            const drawBar = (y, val, max, color, label) => {
+                ctx.fillStyle = "#222"; ctx.fillRect(40, y, 400, 25);
+                ctx.fillStyle = color; ctx.fillRect(40, y, 400 * Math.max(0, Math.min(1, val/max)), 25);
+                ctx.fillStyle = "#fff"; ctx.font = "900 14px Orbitron"; ctx.textAlign = "left";
+                // TEXT CHANGED HERE
+                ctx.fillText(label, 40, y-10);
+            };
+            drawBar(65, player.hp, player.maxHp, "#ff4757", "HEALTH");
+            drawBar(115, player.xp, player.nextXp, "#00ff88", "XP");
+        }
+
+        function drawMenus() {
+            ctx.textAlign = "center";
+            if(gameState === STATES.MENU) {
+                ctx.shadowBlur = 30; ctx.shadowColor = "#00d2ff"; ctx.fillStyle = "#fff"; ctx.font = "900 90px Orbitron"; ctx.fillText("ROUGE SURVIVORS 2", VIEW_W/2, 380);
+                ctx.shadowBlur = 0; ctx.fillStyle = "#00d2ff"; ctx.font = "900 30px Orbitron"; ctx.fillText("GALACTIC OVERDRIVE", VIEW_W/2, 430);
+                ctx.fillStyle = "#fff"; ctx.font = "bold 24px Orbitron"; ctx.globalAlpha = Math.abs(Math.sin(menuTimer*3)); ctx.fillText("CLICK TO INITIALIZE SYSTEMS", VIEW_W/2, 600); ctx.globalAlpha = 1;
+            } else if (gameState === STATES.CHAR_SELECT) {
+                ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+                ctx.fillStyle = "#fff"; ctx.font = "900 50px Orbitron"; ctx.fillText("PILOT REGISTRY", VIEW_W/2, 180);
+                CHARACTERS.forEach((c, i) => {
+                    let x = VIEW_W/2 - 420 + (i * 420); let isSel = char === c;
+                    ctx.fillStyle = isSel ? "rgba(255,255,255,0.1)" : "#050505"; ctx.strokeStyle = isSel ? c.c : "#333"; ctx.lineWidth = 4;
+                    ctx.fillRect(x - 180, 280, 360, 320); ctx.strokeRect(x - 180, 280, 360, 320);
+                    drawShip(x, 340, -Math.PI/2, c.c, c.n);
+                    ctx.fillStyle = isSel ? c.c : "#fff"; ctx.font = "900 24px Orbitron"; ctx.fillText(c.n, x, 450);
+                    ctx.font = "bold 14px Orbitron"; ctx.fillStyle = "#aaa"; ctx.fillText(c.d, x, 490);
+                });
+                ctx.fillStyle = "#fff"; ctx.font = "900 40px Orbitron"; ctx.fillText("DEPLOY TO SECTOR", VIEW_W/2, 740);
+            }
+        }
+
+        canvas.onmousedown = (e) => {
+            if (gameState === STATES.MENU) gameState = STATES.CHAR_SELECT;
+            else if (gameState === STATES.CHAR_SELECT) {
+                CHARACTERS.forEach((c, i) => { let x = VIEW_W/2 - 420 + (i * 420); if (mouse.x > x-180 && mouse.x < x+180 && mouse.y > 280 && mouse.y < 600) char = c; });
+                if (mouse.y > 680 && mouse.y < 800) { reset(); gameState = STATES.PLAYING; }
+            } else if (gameState === STATES.LEVEL_UP) {
+                upgradeChoices.forEach((up, i) => { let y = 320 + (i * 170); if (mouse.y > y-60 && mouse.y < y+80) { up.f(); gameState = STATES.PLAYING; } });
+            } else if (gameState === STATES.GAMEOVER) gameState = STATES.MENU;
+            else if (gameState === STATES.PLAYING) mouse.down = true;
+        };
+        window.onmousemove = e => { let r = canvas.getBoundingClientRect(); mouse.x = (e.clientX-r.left)*(VIEW_W/r.width); mouse.y = (e.clientY-r.top)*(VIEW_H/r.height); };
+        window.onmouseup = () => mouse.down = false; window.onkeydown = e => keys[e.code] = true; window.onkeyup = e => keys[e.code] = false;
+        function reset() { Object.assign(player, { x: MAP_W/2, y: MAP_H/2, hp: char.hp, maxHp: char.hp, xp: 0, lvl: 1, nextXp: 100, fireRate: char.fr, speed: char.s, shield: (char.n === "TANK" ? 4 : 0), dmg: 4 }); enemies = []; bullets = []; crystals = []; wave = 1; enemiesToSpawn = 10; waveMsgTimer = 2.5; particles = []; }
+        function loop() { let now = performance.now(); let dt = (now - lastTime) / 1000; lastTime = now; update(Math.min(dt, 0.05)); draw(); requestAnimationFrame(loop); }
+        requestAnimationFrame(loop);
+    </script>
+</body>
+</html>
