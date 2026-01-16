@@ -155,7 +155,7 @@
             if(mouse.down && player.timer <= 0) { bullets.push({ x: player.x, y: player.y, vx: Math.cos(player.angle)*2100, vy: Math.sin(player.angle)*2100 }); player.timer = player.fireRate; player.muzzleFlash = 1.0; shake = 4; }
             if(player.xp >= player.nextXp) { player.lvl++; player.xp = 0; player.nextXp = Math.floor(player.nextXp * 1.35); upgradeChoices = []; let pool = [...UPGRADES]; for(let i=0; i<3; i++) upgradeChoices.push(pool.splice(Math.floor(Math.random()*pool.length), 1)[0]); gameState = STATES.LEVEL_UP; mouse.down = false; }
             if (enemiesToSpawn > 0 && Math.random() < 0.05) { let side = Math.floor(Math.random()*4), ex, ey; if(side==0){ex=Math.random()*MAP_W; ey=-50;} else if(side==1){ex=MAP_W+50; ey=Math.random()*MAP_H;} else if(side==2){ex=Math.random()*MAP_W; ey=MAP_H+50;} else {ex=-50; ey=Math.random()*MAP_H;} enemies.push({ x: ex, y: ey, r: 22, hp: 2 + (wave*1.2), s: 160 + (wave*10) }); enemiesToSpawn--; }
-            if (enemiesToSpawn === 0 && enemies.length === 0) { wave++; enemiesToSpawn = 20 + (wave * 15); waveMsgTimer = 2.5; }
+            if (enemiesToSpawn === 0 && enemies.length === 0) { wave++; enemiesToSpawn = 200 + (wave * 30); waveMsgTimer = 2.5; }
             bullets.forEach((b, i) => { b.x += b.vx * dt; b.y += b.vy * dt; if(b.x<0 || b.x>MAP_W || b.y<0 || b.y>MAP_H) bullets.splice(i,1); enemies.forEach((e, j) => { if(Math.hypot(b.x-e.x, b.y-e.y) < e.r + 15) { e.hp -= player.dmg; createParticles(b.x, b.y, "white"); bullets.splice(i,1); if(e.hp <= 0) { createParticles(e.x, e.y, "#ff4757"); crystals.push({x: e.x, y: e.y}); enemies.splice(j,1); } } }); });
             particles.forEach((p, i) => { p.x += p.vx; p.y += p.vy; p.life -= dt * 2; if(p.life <= 0) particles.splice(i,1); });
             crystals.forEach((c, i) => { let d = Math.hypot(player.x-c.x, player.y-c.y); if(d < 350) { let a = Math.atan2(player.y-c.y, player.x-c.x); c.x += Math.cos(a)*1200*dt; c.y += Math.sin(a)*1200*dt; } if(d < 50) { player.xp += 34; crystals.splice(i,1); } });
@@ -260,4 +260,5 @@
     </script>
 </body>
 </html>
+
 
