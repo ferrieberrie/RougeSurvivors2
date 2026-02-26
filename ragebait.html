@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RAGEBAIT</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+        body { margin: 0; background: #010108; color: #ff0055; font-family: 'VT323', monospace; overflow: hidden; image-rendering: pixelated; }
+        #overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.92); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .box { background: #0a0a0a; padding: 30px; border: 4px solid #ff0055; text-align: center; width: 450px; box-shadow: 0 0 25px rgba(255, 0, 85, 0.4); }
+        .credit { color: #ff0055; font-size: 20px; margin-top: -5px; margin-bottom: 20px; letter-spacing: 3px; text-shadow: 0 0 8px #f05; }
+        input, select { background: #000; color: #0f0; border: 2px solid #333; padding: 12px; font-family: 'VT323'; font-size: 22px; width: 100%; margin-top: 10px; box-sizing: border-box; outline: none; }
+        .color-label { display: block; margin-top: 15px; font-size: 20px; color: #fff; }
+        button { background: #ff0055; border: none; padding: 15px; color: #fff; font-family: 'VT323'; font-size: 28px; width: 100%; cursor: pointer; margin-top: 20px; font-weight: bold; }
+        button:hover { background: #fff; color: #ff0055; }
+        #hud { position: absolute; top: 15px; left: 15px; font-size: 32px; pointer-events: none; z-index: 10; color: #fff; text-shadow: 2px 2px #f05; }
+        canvas { display: block; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div id="hud">SECTOR: 1/15</div>
+<div id="overlay">
+    <div class="box">
+        <h1 style="margin: 0; font-size: 70px; color: #ff0055; text-shadow: 5px 5px #000;">RAGEBAIT</h1>
+        <div class="credit">CREATED BY CHARLIE FARTHING</div>
+        <input type="text" id="username" placeholder="PLAYER NAME" maxlength="10">
+
+        <label class="color-label">CHARACTER TINT:</label>
+        <input type="color" id="char-color" value="#00ff00" style="height: 50px; cursor: pointer;">
+
+        <div style="display: flex; gap: 10px;">
+            <select id="hat-choice"><option value="none">NO HAT</option><option value="tophat">TOPHAT</option><option value="crown">CROWN</option></select>
+            <select id="glass-choice"><option value="none">NO GLASS</option><option value="shades">SHADES</option><option value="cyber">VISOR</option></select>
+        </div>
+        <input type="text" id="target-id" placeholder="PARTNER ID">
+        <button onclick="connectToFriend()">SYNC SQUADS</button>
+        <button onclick="startGame()" style="background: #222;">GO SOLO</button>
+        <p id="my-id-display" style="color: #444; margin-top: 10px;">CONNECTING...</p>
+    </div>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const PREFIX = "RAGE_V15_";
+const numericId = Math.floor(100000 + Math.random() * 899999).toString();
+const peer = new Peer(PREFIX + numericId);
+let conn, curLvl = 0, lastTime = 0, camX = 0;
+
+peer.on('open', id => document.getElementById('my-id-display').innerText = "YOUR ID: " + numericId);
+peer.on('connection', c => { conn = c; setupNetworking(); startGame(); });
+
+function connectToFriend() {
+    const target = document.getElementById('target-id').value;
+    if(target.length < 6) return;
+    conn = peer.connect(PREFIX + target);
+    setupNetworking();
+    startGame();
+}
+
+function setupNetworking() {
+    conn.on('data', data => {
+        if(data.type === 'sync') {
+            partner.tx = data.x; partner.ty = data.y;
+            partner.hat = data.hat; partner.glass = data.glass;
+            partner.name = data.name; partner.color = data.color;
+        }
+        if(data.type === 'fail') resetLevel(false);
+        if(data.type === 'next') { curLvl = data.lvl; initLevel(); }
+    });
+}
+
+const player = { x: 50, y: 0, vx: 0, vy: 0, size: 36, name: "P1", hat: 'none', glass: 'none', color: '#00ff00', jumping: false, coyote: 0 };
+const partner = { x: -100, y: 0, tx: -100, ty: 0, size: 36, name: "P2", hat: 'none', glass: 'none', color: '#ff00ff' };
+
+// 15 UNIQUE LEVELS
+const levels = [
+    { p: [{x:0, y:500, w:300}, {x:400, y:400, w:200}, {x:700, y:300, w:200}], m: [], goal: 1000 }, // Intro
+    { p: [{x:0, y:500, w:200}], m: [{x:300, y:450, w:200, r:400, s:0.001, v:false}], goal: 1000 }, // Swing 1
+    { p: [{x:0, y:500, w:100}, {x:200, y:400, w:100}, {x:400, y:300, w:100}, {x:600, y:200, w:100}], m: [], goal: 800 }, // Staircase
+    { p: [{x:0, y:500, w:200}, {x:1200, y:500, w:200}], m: [{x:300, y:500, w:200, r:500, s:0.0015, v:false}], goal: 1400 }, // Long Swing
+    { p: [{x:0, y:500, w:200}, {x:500, y:380, w:180}, {x:1000, y:500, w:180}, {x:1500, y:420, w:200}, {x:1950, y:500, w:200}], m: [{x:250, y:450, w:150, r:200, s:0.0008, v:false}, {x:1250, y:450, w:150, r:200, s:0.0007, v:false}], goal: 2150 }, // Level 5 Fixed
+    { p: [{x:0, y:500, w:150}, {x:100, y:200, w:150}, {x:400, y:300, w:150}, {x:700, y:400, w:150}], m: [], goal: 950 }, // Verticality
+    { p: [{x:0, y:500, w:100}], m: [{x:200, y:500, w:100, r:200, s:0.002, v:true}, {x:400, y:500, w:100, r:200, s:0.002, v:true, o:3}], goal: 700 }, // Piston Hop
+    { p: [{x:0, y:500, w:1000}], m: [], goal: 1000 }, // Speedrun Flat
+    { p: [{x:0, y:500, w:150}], m: [{x:200, y:300, w:100, r:200, s:0.001, v:false}, {x:500, y:500, w:100, r:200, s:0.001, v:false}], goal: 850 }, // Opposing Swings
+    { p: [{x:0, y:550, w:100}, {x:200, y:450, w:100}, {x:400, y:350, w:100}, {x:600, y:250, w:100}, {x:800, y:150, w:100}], m: [], goal: 1000 }, // High Tower
+    { p: [{x:0, y:500, w:150}], m: [{x:300, y:500, w:400, r:50, s:0.004, v:false}], goal: 850 }, // Vibrator Platform
+    { p: [{x:0, y:500, w:200}, {x:500, y:500, w:200}, {x:1000, y:500, w:200}], m: [{x:250, y:500, w:100, r:100, s:0.002, v:true}], goal: 1300 }, // The Gaps
+    { p: [{x:0, y:300, w:100}, {x:200, y:500, w:100}, {x:400, y:300, w:100}, {x:600, y:500, w:100}], m: [], goal: 800 }, // Up Down
+    { p: [{x:0, y:500, w:150}], m: [{x:200, y:400, w:100, r:300, s:0.001, v:false}, {x:600, y:400, w:100, r:300, s:0.001, v:true}], goal: 1000 }, // Mixed Motion
+    { p: [{x:0, y:500, w:100}, {x:1500, y:500, w:100}], m: [{x:200, y:500, w:200, r:1200, s:0.0005, v:false}], goal: 1650 } // Final Long Haul
+];
+
+const stars = Array.from({length: 120}, () => ({x: Math.random()*3000, y: Math.random()*canvas.height, s: Math.random()*2.5, p: Math.random()*0.3 + 0.1}));
+
+function startGame() {
+    player.name = document.getElementById('username').value || "NOOB";
+    player.hat = document.getElementById('hat-choice').value;
+    player.glass = document.getElementById('glass-choice').value;
+    player.color = document.getElementById('char-color').value;
+    document.getElementById('overlay').classList.add('hidden');
+    initLevel();
+    requestAnimationFrame(loop);
+}
+
+function initLevel() {
+    player.x = 50; player.y = 100; player.vx = 0; player.vy = 0;
+    document.getElementById('hud').innerText = `SECTOR: ${curLvl + 1}/15`;
+}
+
+function resetLevel(send = true) {
+    initLevel();
+    if(send && conn) conn.send({type: 'fail'});
+}
+
+function drawEntity(p, color, isPartner) {
+    ctx.save();
+    if(isPartner) { p.x += (p.tx - p.x) * 0.25; p.y += (p.ty - p.y) * 0.25; color = p.color; }
+    ctx.fillStyle = "#fff"; ctx.font = "20px VT323"; ctx.textAlign = "center";
+    ctx.fillText(p.name, p.x + p.size/2, p.y - 15);
+    ctx.fillStyle = color; ctx.fillRect(p.x, p.y, p.size, p.size);
+    // SMILEY
+    ctx.fillStyle = "#000";
+    ctx.fillRect(p.x + 7, p.y + 10, 5, 5); ctx.fillRect(p.x + 23, p.y + 10, 5, 5);
+    ctx.fillRect(p.x + 7, p.y + 24, 22, 4);
+    ctx.fillRect(p.x + 5, p.y + 21, 4, 4); ctx.fillRect(p.x + 27, p.y + 21, 4, 4);
+    if(p.hat === 'tophat') { ctx.fillStyle="#222"; ctx.fillRect(p.x-4, p.y-4, 44, 4); ctx.fillRect(p.x+6, p.y-24, 24, 20); }
+    if(p.hat === 'crown') { ctx.fillStyle="#fd0"; ctx.fillRect(p.x, p.y-10, 36, 10); ctx.clearRect(p.x+15, p.y-10, 6, 6); }
+    if(p.glass === 'shades') { ctx.fillStyle="#000"; ctx.fillRect(p.x+3, p.y+8, 30, 8); }
+    if(p.glass === 'cyber') { ctx.fillStyle="#0ff"; ctx.globalAlpha=0.6; ctx.fillRect(p.x-4, p.y+8, 44, 8); ctx.globalAlpha=1; }
+    ctx.restore();
+}
+
+const keys = {};
+window.onkeydown = e => keys[e.code] = true;
+window.onkeyup = e => keys[e.code] = false;
+
+function loop(t) {
+    const dt = Math.min(t - lastTime, 32); lastTime = t;
+    if (keys['ArrowLeft'] || keys['KeyA']) player.vx = -0.52 * dt;
+    else if (keys['ArrowRight'] || keys['KeyD']) player.vx = 0.52 * dt;
+    else player.vx *= Math.pow(0.82, dt/16);
+
+    if ((keys['Space'] || keys['ArrowUp'] || keys['KeyW']) && player.coyote > 0) { player.vy = -14.5; player.coyote = 0; }
+    player.vy += 0.052 * dt;
+
+    let lvl = levels[curLvl] || levels[0];
+    let plats = [...lvl.p];
+
+    lvl.m.forEach(m => {
+        let off = Math.sin((t * m.s) + (m.o || 0)) * m.r;
+        let px = m.x + (m.v ? 0 : off), py = m.y + (m.v ? off : 0);
+        let pOff = Math.sin(((t-dt) * m.s) + (m.o || 0)) * m.r;
+        plats.push({ x: px, y: py, w: m.w, vx: m.v?0:(off-pOff), vy: m.v?(off-pOff):0 });
+    });
+
+    let nX = player.x + player.vx, nY = player.y + player.vy, landed = false;
+    for (let p of plats) {
+        if (nX + player.size > p.x && nX < p.x + p.w) {
+            if (player.y + player.size <= p.y + 15 && nY + player.size >= p.y) {
+                nY = p.y - player.size; player.vy = 0; landed = true;
+                if(p.vx) nX += p.vx; if(p.vy) nY += p.vy;
+            }
+        }
+    }
+
+    if(landed) player.coyote = 120; else player.coyote -= dt;
+    player.x = nX; player.y = nY;
+    if (player.y > canvas.height + 200) resetLevel();
+    if (player.x > lvl.goal) { curLvl++; if(conn) conn.send({type: 'next', lvl: curLvl}); if(curLvl >= 15) curLvl = 0; initLevel(); }
+
+    if(conn && conn.open) conn.send({type:'sync', x:player.x, y:player.y, hat:player.hat, glass:player.glass, name:player.name, color:player.color});
+    camX += ((-player.x + (canvas.width * 0.35)) - camX) * 0.1;
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    stars.forEach(s => { ctx.fillStyle = `rgba(255,255,255,${s.p + 0.5})`; ctx.fillRect(((s.x + camX * s.p) % 3000 + 3000) % 3000, s.y, s.s, s.s); });
+
+    ctx.save(); ctx.translate(camX, 0);
+    const lavaY = canvas.height - 30;
+
+    function drawLava(color, speed, height, offset, bloom) {
+        ctx.shadowBlur = bloom ? 15 : 0; ctx.shadowColor = color; ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(player.x - 1200, canvas.height);
+        for(let i=0; i<6000; i+=60) { let y = lavaY + Math.sin(t * speed + i * 0.012) * height + offset; ctx.lineTo(player.x - 1200 + i, y); }
+        ctx.lineTo(player.x + 5000, canvas.height); ctx.fill();
+    }
+    drawLava("#300", 0.0007, 10, 25, false); drawLava("#900", 0.0014, 18, 12, false); drawLava("#ff3300", 0.0028, 14, 0, true);
+    ctx.shadowBlur = 0;
+
+    plats.forEach(p => { ctx.fillStyle="#0f0"; ctx.fillRect(p.x, p.y, p.w, 15); ctx.fillStyle="#040"; ctx.fillRect(p.x, p.y+15, p.w, 10); });
+    ctx.fillStyle = (Math.floor(t/200)%2) ? "#fff" : "#000"; ctx.fillRect(lvl.goal, 0, 80, canvas.height);
+
+    drawEntity(partner, partner.color, true);
+    drawEntity(player, player.color, false);
+    ctx.restore();
+    requestAnimationFrame(loop);
+}
+</script>
+
+<div class="game-overlay">
+  <a href="index.html" class="game-btn back">BACK</a>
+  <button class="game-btn restart" onclick="location.reload()">RESTART</button>
+</div>
+
+<style>
+    .game-overlay {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  gap: 12px;
+  z-index: 9999;
+}
+
+/* Base button */
+.game-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  font-family: "Press Start 2P", monospace;
+  font-size: 10px;
+  line-height: 1;
+
+  padding: 10px 14px;
+  min-width: 96px;
+  height: 36px;
+
+  background: #000;
+  color: #00ff5a;
+
+  border: 3px solid #00ff5a;
+  box-shadow: 0 0 10px rgba(0, 255, 90, 0.85);
+
+  text-decoration: none;
+  cursor: pointer;
+
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Back button */
+.game-btn.back {
+  color: #ff005c;
+  border-color: #ff005c;
+  box-shadow: 0 0 10px rgba(255, 0, 92, 0.85);
+}
+
+.game-btn.back:hover {
+  background: #ff005c;
+  color: #000;
+  box-shadow: 0 0 18px rgba(255, 0, 92, 1);
+}
+
+/* Restart button */
+.game-btn.restart:hover {
+  background: #00ff5a;
+  color: #000;
+  box-shadow: 0 0 18px rgba(0, 255, 90, 1);
+}
+
+/* Remove button default styling safely */
+button.game-btn {
+  border-radius: 0;
+}
+
+</style>
+</body>
+</html>
